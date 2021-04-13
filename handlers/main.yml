@@ -1,0 +1,31 @@
+---
+- name: start odoo docker whitelists
+  docker_compose:
+    project_src: /home/docker
+    files: whitelists.yaml
+    project_name: whitelists
+
+- name: build odoo docker prod
+  docker_compose:
+    project_src: /home/docker/odoo/
+    build: yes
+    nocache: yes
+    recreate: always
+    restarted: yes
+    remove_orphans: yes
+  async: 600
+  poll: 10
+  when: not ansible_check_mode
+
+- name: start odoo docker prod
+  docker_compose:
+    project_src: /home/docker/odoo/
+    remove_orphans: yes
+
+- name: remove intermediate image
+  docker_prune:
+    builder_cache: yes
+    images: yes
+    images_filters:
+      label: stage=builder
+  when: inventory_hostname not in groups['maintenance_contract']

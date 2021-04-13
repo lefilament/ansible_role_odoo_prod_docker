@@ -1,0 +1,263 @@
+---
+#--------------------------------------------------
+# Whitelists section
+#--------------------------------------------------
+- name: copy docker compose for whitelists
+  template:
+    src: ../docker_odoo_test/templates/whitelists.yaml.j2
+    dest: "/home/docker/whitelists.yaml"
+    owner: root
+    group: root
+    mode: '0400'
+  notify: start odoo docker whitelists
+  when: inventory_hostname in groups['docker_secure'] and whitelisted_urls is defined
+  tags: odoo_whitelists
+
+#--------------------------------------------------
+# Prod Docker section
+#--------------------------------------------------
+- name: create Odoo docker structure on server in /home/docker/odoo
+  file:
+    name: "/home/docker/odoo"
+    state: directory
+    owner: root
+    group: root
+  when: odoo_prod is defined
+
+- name: create Odoo docker structure on server in /home/docker/odoo/private
+  file:
+    name: /home/docker/odoo/odoo/private
+    state: directory
+    owner: root
+    group: root
+  when: odoo_nonprod_instances is not defined and odoo_prod is defined
+
+- name: copy Dockerfile to retrieve private repos and extra OCA ones
+  template:
+    src: ../docker_odoo_test/templates/Dockerfile.j2
+    dest: "/home/docker/odoo/odoo/Dockerfile"
+    owner: root
+    group: root
+    mode: '0644'
+  when: odoo_nonprod_instances is not defined and odoo_prod is defined
+  notify:
+    - pull odoo docker ML image
+    - pull odoo docker image
+    - build odoo docker prod
+
+- name: copy update scripts to be run during build
+  template:
+    src: "../docker_odoo_test/templates/{{ item }}"
+    dest: "/home/docker/odoo/odoo/private/"
+    owner: root
+    group: root
+    mode: '0750'
+  with_items:
+    - fetch_repos
+    - fetch_repos_addons
+  when: odoo_nonprod_instances is not defined and odoo_prod is defined
+  notify:
+    - pull odoo docker ML image
+    - pull odoo docker image
+    - build odoo docker prod
+
+- name: set repos variables from template
+  template:
+    src: "../docker_odoo_test/templates/repos.yaml.j2"
+    dest: "/home/docker/odoo/odoo/private/repos.yaml"
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    item: "{{ odoo_prod }}"
+  when: odoo_nonprod_instances is not defined and odoo_prod is defined
+  notify:
+    - pull odoo docker ML image
+    - pull odoo docker image
+    - build odoo docker prod
+
+- name: set repos-addons variables from template
+  template:
+    src: "../docker_odoo_test/templates/repos-addons.yaml.j2"
+    dest: "/home/docker/odoo/odoo/private/repos-addons.yaml"
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    item: "{{ odoo_prod }}"
+  when: odoo_nonprod_instances is not defined and odoo_prod is defined
+  notify:
+    - pull odoo docker ML image
+    - pull odoo docker image
+    - build odoo docker prod
+
+- name: copy odoo.conf file
+  template:
+    src: ../docker_odoo_test/templates/odoo.conf.j2
+    dest: "/home/docker/odoo/odoo/odoo.conf"
+    owner: root
+    group: root
+    mode: '0600'
+  when: odoo_nonprod_instances is not defined and odoo_prod is defined
+  notify:
+    - pull odoo docker ML image
+    - pull odoo docker image
+    - build odoo docker prod
+
+- name: copy private ssh keys file
+  copy:
+    content: "{{ git_private_keys }}"
+    dest: "/home/docker/odoo/odoo/id_rsa"
+    owner: root
+    group: root
+    mode: '0600'
+  when: git_private_keys is defined and odoo_nonprod_instances is not defined and odoo_prod is defined
+  notify: build odoo docker prod
+
+- name: Check if prod image exists
+  docker_image_info:
+    name: filament/odoo:{{ odoo_version }}
+  register: prod_image
+
+- name: Copy test image to prod if it does not exist
+  docker_image:
+    name: filament/odoo:{{ odoo_nonprod_instances[0]['image_version'] }}test
+    repository: filament/odoo:{{ odoo_version }}
+    source: local
+  when: prod_image.images | length == 0 and odoo_nonprod_instances is defined and odoo_prod is defined
+
+- name: copy prod docker compose service
+  template:
+    src: prod.yaml.j2
+    dest: /home/docker/odoo/docker-compose.yml
+    owner: root
+    group: root
+    mode: '0400'
+  when: odoo_prod is defined
+  notify: start odoo docker prod
+
+#--------------------------------------------------
+# Banking section
+#--------------------------------------------------
+#- name: Install Debian OS packages
+#  apt:
+#    name: ['python3-pip', 'python3-virtualenv', 'python3-setuptools']
+#    state: latest
+#    update_cache: yes
+#    force: yes
+#    install_recommends: no
+#  async: 120
+#  poll: 10
+#  when: not ansible_check_mode and ansible_os_family == "Debian" and banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: Check Installed Debian OS packages
+#  apt:
+#    name: ['python3-pip', 'python3-virtualenv', 'python3-setuptools']
+#    state: latest
+#    update_cache: yes
+#    force: yes
+#    install_recommends: no
+#  when: ansible_check_mode and ansible_os_family == "Debian" and banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: Clone Weboob GIT repo
+#  git: repo="https://git.weboob.org/weboob/weboob.git" version="master" dest="/root/weboob"
+#  when: banking is defined and odoo_prod is defined
+#  register: weboob
+#  tags: bank
+
+#- name: Install necessary python modules
+#  pip:
+#    name: ['prettytable', 'cssselect', 'html2text', 'unidecode', 'python-dateutil', 'lxml', 'Pillow', 'Babel', 'pyyaml', 'requests', 'pyOpenSSL']
+#    executable: /usr/bin/pip3
+#    state: latest
+#  when: banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: Create Config directory
+#  file:
+#    name: /root/.config/weboob
+#    state: directory
+#  when: banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: Copy configuration file
+#  template: src=backends.j2 dest=/root/.config/weboob/backends mode=0400
+#  when: banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: create bank repo
+#  file:
+#    name: /home/docker/odoo/bank
+#    state: directory
+#    owner: root
+#    group: root
+#  when: banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: add cron job to get bank account every day
+#  cron:
+#    name: import bank moves
+#    minute: "30"
+#    hour: "20"
+#    job: /root/weboob/tools/local_run.sh boobank history {{ bank_account }} `date -d "last week" +\%Y-\%m-\%d` -f ofx | sed -n '/OFXHEADER/,$p' | sed 's/.*OFXHEADER/OFXHEADER/g' | sed 's/ACCTID>CPT/ACCTID>/g' > /home/docker/odoo/bank/bank_account_import.ofx ; chmod 444 /home/docker/odoo/bank/bank_account_import.ofx
+#  when: banking is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: add cron job to get bank account 2 every day
+#  cron:
+#    name: import bank moves account 2
+#    minute: "50"
+#    hour: "20"
+#    job: /root/weboob/tools/local_run.sh boobank history {{ bank_account2 }} `date -d "last week" +\%Y-\%m-\%d` -f ofx | sed -n '/OFXHEADER/,$p' | sed 's/.*OFXHEADER/OFXHEADER/g' | sed 's/ACCTID>CPT/ACCTID>/g' > /home/docker/odoo/bank/bank_account2_import.ofx ; chmod 444 /home/docker/odoo/bank/bank_account2_import.ofx
+#  when: banking is defined and bank_account2 is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: add cron job to get bank account 3 every day
+#  cron:
+#    name: import bank moves account 3
+#    minute: "10"
+#    hour: "21"
+#    job: /root/weboob/tools/local_run.sh boobank history {{ bank_account3 }} `date -d "last week" +\%Y-\%m-\%d` -f ofx | sed -n '/OFXHEADER/,$p' | sed 's/.*OFXHEADER/OFXHEADER/g' | sed 's/ACCTID>CPT/ACCTID>/g' > /home/docker/odoo/bank/bank_account3_import.ofx ; chmod 444 /home/docker/odoo/bank/bank_account3_import.ofx
+#  when: banking is defined and bank_account3 is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: add cron job to get bank 2 account every day
+#  cron:
+#    name: import bank 2 moves
+#    minute: "25"
+#    hour: "20"
+#    job: /root/weboob/tools/local_run.sh boobank history {{ bank2_account }} `date -d "last week" +\%Y-\%m-\%d` -f ofx | sed -n '/OFXHEADER/,$p' | sed 's/.*OFXHEADER/OFXHEADER/g' | sed 's/ACCTID>CPT/ACCTID>/g' > /home/docker/odoo/bank/bank2_account_import.ofx ; chmod 444 /home/docker/odoo/bank/bank2_account_import.ofx
+#  when: banking is defined and bank2_account is defined and odoo_prod is defined
+#  tags: bank
+
+#- name: add cron job to get bank 2 account 2 every day
+#  cron:
+#    name: import bank 2 moves account 2
+#    minute: "45"
+#    hour: "20"
+#    job: /root/weboob/tools/local_run.sh boobank history {{ bank2_account2 }} `date -d "last week" +\%Y-\%m-\%d` -f ofx | sed -n '/OFXHEADER/,$p' | sed 's/.*OFXHEADER/OFXHEADER/g' | sed 's/ACCTID>CPT/ACCTID>/g' > /home/docker/odoo/bank/bank2_account2_import.ofx ; chmod 444 /home/docker/odoo/bank/bank2_account2_import.ofx
+#  when: banking is defined and bank2_account2 is defined and odoo_prod is defined
+#  tags: bank
+
+#--------------------------------------------------
+# Backup section
+#--------------------------------------------------
+- name: copy docker compose for backups
+  template:
+    src: backup.yaml.j2
+    dest: "/home/docker/backups/backup-odoo.yaml"
+    owner: root
+    group: root
+    mode: '0400'
+  when: inventory_hostname in groups.maintenance_contract and odoo_prod is defined
+
+- name: add cron job to run backup every day
+  cron:
+    name: backup odoo
+    minute: "8"
+    hour: "2"
+    job: /usr/local/bin/docker-compose -f /home/docker/backups/backup-odoo.yaml run --rm backup_odoo
+  when: inventory_hostname in groups.maintenance_contract and odoo_prod is defined
+
